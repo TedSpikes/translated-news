@@ -111,7 +111,8 @@ async def fetch_feed(http_client: httpx.AsyncClient, feed: Feed) -> list[Article
 
 async def fetch_all_feeds() -> list[Article]:
     """Fetch every feed at once. A feed that fails is logged and skipped, so one broken site doesn't block the rest."""
-    async with httpx.AsyncClient(headers={"User-Agent": USER_AGENT}, timeout=20, follow_redirects=True) as http_client:
+    # The page waits for this when it opens, so a hanging site is given up on after 10 seconds.
+    async with httpx.AsyncClient(headers={"User-Agent": USER_AGENT}, timeout=10, follow_redirects=True) as http_client:
         results = await asyncio.gather(*(fetch_feed(http_client, feed) for feed in FEEDS), return_exceptions=True)
 
     articles = []

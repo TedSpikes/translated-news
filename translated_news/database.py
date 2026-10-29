@@ -1,5 +1,6 @@
 """SQLite storage for fetched articles."""
 
+import os
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -8,6 +9,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from translated_news.feeds import Article
+
+# Anchored to the repo, not the current folder, so the web server and the cron job always open the same file.
+DEFAULT_DATABASE_PATH = Path(__file__).resolve().parent.parent / "data" / "articles.db"
+
+
+def database_path_from_environment() -> Path:
+    return Path(os.environ.get("TRANSLATED_NEWS_DATABASE_PATH", DEFAULT_DATABASE_PATH))
 
 # published_at is stored as ISO 8601 in UTC, so sorting the text sorts by time.
 CREATE_ARTICLES_TABLE = """
@@ -57,6 +65,14 @@ def save_articles(database_path: Path, articles: list[Article]) -> None:
                 for article in articles
             ],
         )
+
+
+def delete_articles_published_before(database_path: Path, cutoff: datetime) -> int:
+    """Returns how many articles were deleted."""
+    with open_database(database_path) as connection:
+        return connection.execute(
+            "DELETE FROM articles WHERE published_at < ?", (cutoff.astimezone(UTC).isoformat(),)
+        ).rowcount
 
 
 @dataclass(frozen=True)

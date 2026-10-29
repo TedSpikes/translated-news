@@ -1,10 +1,10 @@
-"""The web server. Serves stored articles and refreshes the feeds in the background."""
+"""The web server. Serves the page and the stored articles, and refreshes the feeds when the page opens."""
 
 import asyncio
 import logging
-import os
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated
 
@@ -13,12 +13,14 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import AwareDatetime
 
 from translated_news import database
-from translated_news.feeds import FEEDS, Article, Category, Site, fetch_all_feeds
+from translated_news.feeds import FEEDS, Article, Category, Site
+from translated_news.refresh import refresh_feeds
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-logger = logging.getLogger(__name__)
 
 FRONTEND_DIRECTORY = Path(__file__).resolve().parent.parent / "frontend"
+# Reloading the page, or opening it in several tabs, shouldn't fetch every feed again each time.
+MINIMUM_TIME_BETWEEN_PAGE_REFRESHES = timedelta(minutes=1)
 
 
 @dataclass(frozen=True)
@@ -26,29 +28,33 @@ class ArticleWithSite(Article):
     site: Site
 
 
-async def refresh_feeds_forever(database_path: Path, refresh_interval_seconds: float) -> None:
-    while True:
-        try:
-            articles = await fetch_all_feeds()
-            database.save_articles(database_path, articles)
-            logger.info("Saved %d articles", len(articles))
-        except Exception:
-            logger.exception("Feed refresh failed; will retry in %s seconds", refresh_interval_seconds)
-        await asyncio.sleep(refresh_interval_seconds)
+@dataclass(frozen=True)
+class RefreshResult:
+    refreshed: bool
+    articles_fetched: int
 
 
-def create_app(database_path: Path, refresh_interval_seconds: float, refresh_feeds_in_background: bool = True) -> FastAPI:
+def create_app(database_path: Path) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         database.create_tables(database_path)
-        refresh_task = None
-        if refresh_feeds_in_background:
-            refresh_task = asyncio.create_task(refresh_feeds_forever(database_path, refresh_interval_seconds))
         yield
-        if refresh_task:
-            refresh_task.cancel()
 
     app = FastAPI(title="translated-news", lifespan=lifespan)
+    refresh_lock = asyncio.Lock()
+    last_refreshed_at: datetime | None = None
+
+    @app.post("/refresh")
+    async def refresh() -> RefreshResult:
+        """Fetch every feed now, unless this server already did within the last minute. The page calls this when it opens."""
+        nonlocal last_refreshed_at
+        # Requests that arrive during a refresh wait for it, then find it recent and skip.
+        async with refresh_lock:
+            if last_refreshed_at and datetime.now(UTC) - last_refreshed_at < MINIMUM_TIME_BETWEEN_PAGE_REFRESHES:
+                return RefreshResult(refreshed=False, articles_fetched=0)
+            articles_fetched = await refresh_feeds(database_path)
+            last_refreshed_at = datetime.now(UTC)
+            return RefreshResult(refreshed=True, articles_fetched=articles_fetched)
 
     @app.get("/articles")
     def get_articles(
@@ -78,7 +84,4 @@ def create_app(database_path: Path, refresh_interval_seconds: float, refresh_fee
     return app
 
 
-app = create_app(
-    database_path=Path(os.environ.get("TRANSLATED_NEWS_DATABASE_PATH", "data/articles.db")),
-    refresh_interval_seconds=float(os.environ.get("TRANSLATED_NEWS_REFRESH_INTERVAL_SECONDS", "600")),
-)
+app = create_app(database.database_path_from_environment())

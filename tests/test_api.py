@@ -1,9 +1,10 @@
-from datetime import UTC, datetime
+import asyncio
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
 
-from translated_news import database
+from translated_news import database, refresh
 from translated_news.feeds import Article
 from translated_news.main import create_app
 
@@ -26,9 +27,44 @@ def database_path(tmp_path):
 
 @pytest.fixture
 def client(database_path):
-    app = create_app(database_path=database_path, refresh_interval_seconds=600, refresh_feeds_in_background=False)
-    with TestClient(app) as client:
+    with TestClient(create_app(database_path)) as client:
         yield client
+
+
+def test_refresh_saves_the_feeds_and_a_second_refresh_within_a_minute_is_skipped(client, monkeypatch):
+    fetch_count = 0
+
+    async def fake_fetch_all_feeds():
+        nonlocal fetch_count
+        fetch_count += 1
+        return [make_article("fresh", datetime.now(UTC))]
+
+    monkeypatch.setattr(refresh, "fetch_all_feeds", fake_fetch_all_feeds)
+
+    first = client.post("/refresh").json()
+    second = client.post("/refresh").json()
+
+    assert first == {"refreshed": True, "articles_fetched": 1}
+    assert second == {"refreshed": False, "articles_fetched": 0}
+    assert fetch_count == 1
+    assert [article["guid"] for article in client.get("/articles").json()] == ["fresh"]
+
+
+def test_refresh_deletes_articles_older_than_a_year(database_path, monkeypatch):
+    database.create_tables(database_path)
+    now = datetime.now(UTC)
+    database.save_articles(
+        database_path,
+        [make_article("too-old", now - timedelta(days=366)), make_article("recent", now - timedelta(days=364))],
+    )
+
+    async def no_articles():
+        return []
+
+    monkeypatch.setattr(refresh, "fetch_all_feeds", no_articles)
+    asyncio.run(refresh.refresh_feeds(database_path))
+
+    assert [article.guid for article in database.list_newest_articles(database_path, 10, ["ynet"])] == ["recent"]
 
 
 def test_articles_come_back_newest_first_with_their_site(client, database_path):

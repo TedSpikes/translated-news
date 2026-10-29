@@ -1,6 +1,7 @@
-// Fills each column on the page with articles from its category, newest first, and loads older ones
-// on request: automatically near the bottom when the columns sit side by side, and with the
-// "Load older articles" button when they are stacked (so one column can't block the next).
+// Asks the server to fetch the feeds, then fills each column with articles from its category,
+// newest first, and loads older ones on request: automatically near the bottom when the columns
+// sit side by side, and with the "Load older articles" button when they are stacked (so one
+// column can't block the next).
 
 const ARTICLES_PER_PAGE = 30;
 const HEBREW_LETTER = /[\u0590-\u05FF]/;
@@ -120,4 +121,16 @@ function setUpColumn(column) {
   loadNextPage();
 }
 
-document.querySelectorAll(".column").forEach(setUpColumn);
+// If the feeds can't be fetched, the saved articles are still worth showing, with a note saying so.
+async function refreshFeeds() {
+  try {
+    const response = await fetch("/refresh", { method: "POST" });
+    if (!response.ok) throw new Error(`the server answered ${response.status}`);
+  } catch (error) {
+    const notice = document.querySelector(".page-notice");
+    notice.textContent = `Couldn't check for new articles (${error.message}); showing the saved ones.`;
+    notice.hidden = false;
+  }
+}
+
+refreshFeeds().then(() => document.querySelectorAll(".column").forEach(setUpColumn));

@@ -46,6 +46,12 @@ body {
   font-weight: 600;
 }
 
+.page-notice {
+  margin: 6px 0 0;
+  font-size: 14px;
+  color: var(--secondary-text);
+}
+
 .columns {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
