@@ -78,13 +78,32 @@ body {
   list-style: none;
 }
 
-.result,
-.status {
+.result {
   padding: 14px 0;
 }
 
-.status {
+.column-status {
+  margin: 0;
+  padding: 14px 0;
   color: var(--secondary-text);
+}
+
+/* No `display` here: it would override the `hidden` attribute that app.js toggles. */
+.load-older {
+  width: 100%;
+  margin: 8px 0;
+  padding: 10px;
+  border: 1px solid var(--divider);
+  border-radius: 8px;
+  background: none;
+  color: var(--title-link);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.load-older:hover {
+  border-color: var(--secondary-text);
 }
 
 .result-title {

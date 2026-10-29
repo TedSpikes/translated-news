@@ -3,7 +3,8 @@
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 from translated_news.feeds import Article
@@ -58,15 +59,32 @@ def save_articles(database_path: Path, articles: list[Article]) -> None:
         )
 
 
-def list_newest_articles(database_path: Path, limit: int, feed_names: list[str]) -> list[Article]:
+@dataclass(frozen=True)
+class ArticlePosition:
+    """An article's place in the newest-first order. All three parts are needed:
+    several articles can share a publish time (Globes rounds to the minute)."""
+
+    published_at: datetime
+    feed_name: str
+    guid: str
+
+
+def list_newest_articles(
+    database_path: Path, limit: int, feed_names: list[str], older_than: ArticlePosition | None = None
+) -> list[Article]:
+    """Newest first. With older_than, only the articles that come after that position, for loading the next page."""
     placeholders = ", ".join("?" for _ in feed_names)
+    older_than_condition, older_than_values = "", ()
+    if older_than:
+        older_than_condition = "AND (published_at, feed_name, guid) < (?, ?, ?)"
+        older_than_values = (older_than.published_at.astimezone(UTC).isoformat(), older_than.feed_name, older_than.guid)
     with open_database(database_path) as connection:
         rows = connection.execute(
             f"""
             SELECT feed_name, guid, url, headline, summary, published_at
-            FROM articles WHERE feed_name IN ({placeholders})
-            ORDER BY published_at DESC LIMIT ?
+            FROM articles WHERE feed_name IN ({placeholders}) {older_than_condition}
+            ORDER BY published_at DESC, feed_name DESC, guid DESC LIMIT ?
             """,
-            (*feed_names, limit),
+            (*feed_names, *older_than_values, limit),
         ).fetchall()
     return [Article(**dict(row) | {"published_at": datetime.fromisoformat(row["published_at"])}) for row in rows]

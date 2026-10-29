@@ -72,6 +72,40 @@ def test_unknown_category_is_rejected(client):
     assert client.get("/articles", params={"category": "sport"}).status_code == 422
 
 
+def test_paging_with_older_than_returns_every_article_once_even_with_equal_times(client, database_path):
+    same_minute = datetime(2026, 10, 29, 10, 0, tzinfo=UTC)
+    database.save_articles(
+        database_path,
+        [
+            make_article("newest", datetime(2026, 10, 29, 11, 0, tzinfo=UTC), feed_name="globes"),
+            make_article("tie-a", same_minute, feed_name="globes"),
+            make_article("tie-b", same_minute, feed_name="globes"),
+            make_article("tie-c", same_minute, feed_name="themarker"),
+            make_article("oldest", datetime(2026, 10, 29, 9, 0, tzinfo=UTC), feed_name="ynet-economy"),
+        ],
+    )
+
+    seen_guids, older_than = [], {}
+    while True:
+        page = client.get("/articles", params={"category": "finance", "limit": 2, **older_than}).json()
+        seen_guids += [article["guid"] for article in page]
+        if len(page) < 2:
+            break
+        last = page[-1]
+        older_than = {
+            "older_than_published_at": last["published_at"],
+            "older_than_feed_name": last["feed_name"],
+            "older_than_guid": last["guid"],
+        }
+
+    assert seen_guids == ["newest", "tie-c", "tie-b", "tie-a", "oldest"]
+
+
+def test_older_than_needs_all_three_parts(client):
+    response = client.get("/articles", params={"older_than_published_at": "2026-10-29T10:00:00Z"})
+    assert response.status_code == 422
+
+
 def test_page_is_served_at_the_root(client):
     response = client.get("/")
     assert response.status_code == 200

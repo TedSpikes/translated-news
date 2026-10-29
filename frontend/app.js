@@ -1,7 +1,11 @@
-// Fills each column on the page with the newest articles from its category.
+// Fills each column on the page with articles from its category, newest first, and loads older ones
+// on request: automatically near the bottom when the columns sit side by side, and with the
+// "Load older articles" button when they are stacked (so one column can't block the next).
 
-const ARTICLES_PER_COLUMN = 30;
+const ARTICLES_PER_PAGE = 30;
 const HEBREW_LETTER = /[\u0590-\u05FF]/;
+// Must match the width in style.css below which the columns stack.
+const COLUMNS_SIDE_BY_SIDE = window.matchMedia("(min-width: 961px)");
 const relativeTime = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
 const resultTemplate = document.getElementById("result-template");
 
@@ -54,28 +58,66 @@ function renderArticle(article) {
   return result;
 }
 
-function statusItem(message) {
-  const item = document.createElement("li");
-  item.className = "status";
-  item.textContent = message;
-  return item;
-}
-
-async function fillColumn(column) {
-  const resultList = column.querySelector(".results");
-  const query = new URLSearchParams({ category: column.dataset.category, limit: ARTICLES_PER_COLUMN });
-  try {
-    const response = await fetch(`/articles?${query}`);
-    if (!response.ok) throw new Error(`the server answered ${response.status}`);
-    const results = (await response.json()).map(renderArticle).filter(Boolean);
-    if (results.length) {
-      resultList.replaceChildren(...results);
-    } else {
-      resultList.replaceChildren(statusItem("No articles yet. The server fetches the feeds when it starts; reload in a few seconds."));
-    }
-  } catch (error) {
-    resultList.replaceChildren(statusItem(`Couldn't load articles: ${error.message}`));
+function articlesUrl(category, lastShownArticle) {
+  const query = new URLSearchParams({ category, limit: ARTICLES_PER_PAGE });
+  if (lastShownArticle) {
+    query.set("older_than_published_at", lastShownArticle.published_at);
+    query.set("older_than_feed_name", lastShownArticle.feed_name);
+    query.set("older_than_guid", lastShownArticle.guid);
   }
+  return `/articles?${query}`;
 }
 
-document.querySelectorAll(".column").forEach(fillColumn);
+function setUpColumn(column) {
+  const resultList = column.querySelector(".results");
+  const status = column.querySelector(".column-status");
+  const loadOlderButton = column.querySelector(".load-older");
+  let lastShownArticle = null;
+  let lastLoadFailed = false;
+
+  function showStatus(message) {
+    status.textContent = message;
+    status.hidden = !message;
+  }
+
+  // The button stays hidden while a page loads, so neither a click nor the observer can start a second load.
+  async function loadNextPage() {
+    loadOlderButton.hidden = true;
+    showStatus("Loading…");
+    try {
+      const response = await fetch(articlesUrl(column.dataset.category, lastShownArticle));
+      if (!response.ok) throw new Error(`the server answered ${response.status}`);
+      const articles = await response.json();
+      resultList.append(...articles.map(renderArticle).filter(Boolean));
+      lastLoadFailed = false;
+      if (articles.length === ARTICLES_PER_PAGE) {
+        lastShownArticle = articles.at(-1);
+        showStatus("");
+        loadOlderButton.hidden = false;
+      } else if (lastShownArticle || articles.length) {
+        showStatus("No older articles. The archive goes back to when the server started collecting.");
+      } else {
+        showStatus("No articles yet. The server fetches the feeds when it starts; reload in a few seconds.");
+      }
+    } catch (error) {
+      // No automatic retry after a failure, or a down server would be asked again and again.
+      lastLoadFailed = true;
+      showStatus(`Couldn't load articles: ${error.message}`);
+      loadOlderButton.hidden = false;
+    }
+  }
+
+  // Fires when the button appears within 800px below the screen, including right after a page
+  // loads, so a column keeps filling until its end is out of reach.
+  const nearBottomObserver = new IntersectionObserver(
+    ([entry]) => {
+      if (entry.isIntersecting && COLUMNS_SIDE_BY_SIDE.matches && !lastLoadFailed) loadNextPage();
+    },
+    { rootMargin: "0px 0px 800px 0px" },
+  );
+  nearBottomObserver.observe(loadOlderButton);
+  loadOlderButton.addEventListener("click", loadNextPage);
+  loadNextPage();
+}
+
+document.querySelectorAll(".column").forEach(setUpColumn);
