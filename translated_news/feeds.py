@@ -6,6 +6,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Literal
 
 import feedparser
 import httpx
@@ -23,21 +24,40 @@ WHITESPACE = re.compile(r"\s+")
 SENTENCE_SEPARATOR = re.compile(r'((?<=[.!?])\s+|(?<=[.!?]["”])\s+|\s+[•■*]\s+)')
 
 
+Category = Literal["finance", "politics", "entertainment"]
+
+
+@dataclass(frozen=True)
+class Site:
+    name: str
+    favicon_url: str
+
+
 @dataclass(frozen=True)
 class Feed:
     name: str
     url: str
+    category: Category
+    site: Site
 
+
+# Ynet, Haaretz and TheMarker don't serve their icon at /favicon.ico; these are the ones their homepages link to.
+YNET = Site(name="Ynet", favicon_url="https://www.ynet.co.il/images/favicon/favicon_1.ico")
+WALLA = Site(name="Walla", favicon_url="https://www.walla.co.il/favicon.ico")
+HAARETZ = Site(name="Haaretz", favicon_url="https://www.haaretz.co.il/v2/htz-bucket/static/favicon.ico")
+ZMAN_YISRAEL = Site(name="Zman Yisrael", favicon_url="https://www.zman.co.il/favicon.ico")
+GLOBES = Site(name="Globes", favicon_url="https://www.globes.co.il/favicon.ico")
+THEMARKER = Site(name="TheMarker", favicon_url="https://www.themarker.com/v2/tm-bucket/static/favicon.ico")
 
 FEEDS = [
-    Feed(name="ynet", url="https://www.ynet.co.il/Integration/StoryRss2.xml"),
-    Feed(name="ynet-economy", url="https://www.ynet.co.il/Integration/StoryRss6.xml"),
-    Feed(name="ynet-culture", url="https://www.ynet.co.il/Integration/StoryRss538.xml"),
-    Feed(name="walla-politics", url="https://www.walla.co.il/rss/feed/news/politics"),
-    Feed(name="haaretz", url="https://www.haaretz.co.il/srv/rss---feedly"),
-    Feed(name="zman-yisrael", url="https://www.zman.co.il/feed/"),
-    Feed(name="globes", url="https://www.globes.co.il/webservice/rss/rssfeeder.asmx/FeederNode?iID=2"),
-    Feed(name="themarker", url="https://www.themarker.com/srv/tm-all-articles"),
+    Feed(name="ynet", url="https://www.ynet.co.il/Integration/StoryRss2.xml", category="politics", site=YNET),
+    Feed(name="ynet-economy", url="https://www.ynet.co.il/Integration/StoryRss6.xml", category="finance", site=YNET),
+    Feed(name="ynet-culture", url="https://www.ynet.co.il/Integration/StoryRss538.xml", category="entertainment", site=YNET),
+    Feed(name="walla-politics", url="https://www.walla.co.il/rss/feed/news/politics", category="politics", site=WALLA),
+    Feed(name="haaretz", url="https://www.haaretz.co.il/srv/rss---feedly", category="politics", site=HAARETZ),
+    Feed(name="zman-yisrael", url="https://www.zman.co.il/feed/", category="politics", site=ZMAN_YISRAEL),
+    Feed(name="globes", url="https://www.globes.co.il/webservice/rss/rssfeeder.asmx/FeederNode?iID=2", category="finance", site=GLOBES),
+    Feed(name="themarker", url="https://www.themarker.com/srv/tm-all-articles", category="finance", site=THEMARKER),
 ]
 
 

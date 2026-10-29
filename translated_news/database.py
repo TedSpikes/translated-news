@@ -58,13 +58,15 @@ def save_articles(database_path: Path, articles: list[Article]) -> None:
         )
 
 
-def list_newest_articles(database_path: Path, limit: int) -> list[Article]:
+def list_newest_articles(database_path: Path, limit: int, feed_names: list[str]) -> list[Article]:
+    placeholders = ", ".join("?" for _ in feed_names)
     with open_database(database_path) as connection:
         rows = connection.execute(
-            """
+            f"""
             SELECT feed_name, guid, url, headline, summary, published_at
-            FROM articles ORDER BY published_at DESC LIMIT ?
+            FROM articles WHERE feed_name IN ({placeholders})
+            ORDER BY published_at DESC LIMIT ?
             """,
-            (limit,),
+            (*feed_names, limit),
         ).fetchall()
     return [Article(**dict(row) | {"published_at": datetime.fromisoformat(row["published_at"])}) for row in rows]

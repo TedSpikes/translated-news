@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Translated News</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="page-header">
+    <h1>Translated News</h1>
+  </header>
+
+  <main class="columns">
+    <section class="column" data-category="finance">
+      <h2>Finance</h2>
+      <ol class="results"><li class="status">Loading…</li></ol>
+    </section>
+    <section class="column" data-category="politics">
+      <h2>Politics</h2>
+      <ol class="results"><li class="status">Loading…</li></ol>
+    </section>
+    <section class="column" data-category="entertainment">
+      <h2>Entertainment</h2>
+      <ol class="results"><li class="status">Loading…</li></ol>
+    </section>
+  </main>
+
+  <template id="result-template">
+    <li class="result">
+      <a class="result-title" target="_blank" rel="noopener noreferrer"></a>
+      <div class="result-source">
+        <img class="result-favicon" alt="" width="18" height="18">
+        <span class="result-site-name" dir="ltr"></span>
+        <span class="result-separator" aria-hidden="true">·</span>
+        <span class="result-url" dir="ltr"></span>
+        <span class="result-separator" aria-hidden="true">·</span>
+        <span class="result-age" dir="ltr"></span>
+      </div>
+      <p class="result-teaser"></p>
+    </li>
+  </template>
+</body>
+</html>

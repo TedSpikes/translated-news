@@ -4,16 +4,25 @@ import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Annotated
 
 from fastapi import FastAPI, Query
+from fastapi.staticfiles import StaticFiles
 
 from translated_news import database
-from translated_news.feeds import Article, fetch_all_feeds
+from translated_news.feeds import FEEDS, Article, Category, Site, fetch_all_feeds
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
+
+FRONTEND_DIRECTORY = Path(__file__).resolve().parent.parent / "frontend"
+
+
+@dataclass(frozen=True)
+class ArticleWithSite(Article):
+    site: Site
 
 
 async def refresh_feeds_forever(database_path: Path, refresh_interval_seconds: float) -> None:
@@ -41,9 +50,14 @@ def create_app(database_path: Path, refresh_interval_seconds: float, refresh_fee
     app = FastAPI(title="translated-news", lifespan=lifespan)
 
     @app.get("/articles")
-    def get_articles(limit: Annotated[int, Query(ge=1, le=200)] = 50) -> list[Article]:
-        """The newest articles from all feeds, newest first."""
-        return database.list_newest_articles(database_path, limit)
+    def get_articles(category: Category | None = None, limit: Annotated[int, Query(ge=1, le=200)] = 50) -> list[ArticleWithSite]:
+        """The newest articles, newest first: from one category, or from every feed if no category is given."""
+        feeds_by_name = {feed.name: feed for feed in FEEDS if category is None or feed.category == category}
+        articles = database.list_newest_articles(database_path, limit, feed_names=list(feeds_by_name))
+        return [ArticleWithSite(**asdict(article), site=feeds_by_name[article.feed_name].site) for article in articles]
+
+    # Mounted last so the API routes above take priority over files with the same path.
+    app.mount("/", StaticFiles(directory=FRONTEND_DIRECTORY, html=True), name="frontend")
 
     return app
 

@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from translated_news.feeds import Article, Feed, first_sentences, parse_feed
+from translated_news.feeds import GLOBES, YNET, Article, Feed, first_sentences, parse_feed
 
 # Same shape as the real Ynet feed: CDATA everywhere, and an image link before the teaser.
 YNET_STYLE_FEED = """<?xml version='1.0' encoding='utf-8' ?>
@@ -30,7 +30,7 @@ GLOBES_STYLE_FEED = """<?xml version="1.0" encoding="utf-8"?>
 
 
 def test_parses_ynet_style_item():
-    [article] = parse_feed(Feed(name="ynet", url="unused"), YNET_STYLE_FEED)
+    [article] = parse_feed(Feed(name="ynet", url="unused", category="politics", site=YNET), YNET_STYLE_FEED)
     assert article == Article(
         feed_name="ynet",
         guid="https://www.ynet.co.il/news/article/abc",
@@ -42,7 +42,7 @@ def test_parses_ynet_style_item():
 
 
 def test_parses_globes_style_item():
-    [article] = parse_feed(Feed(name="globes", url="unused"), GLOBES_STYLE_FEED)
+    [article] = parse_feed(Feed(name="globes", url="unused", category="finance", site=GLOBES), GLOBES_STYLE_FEED)
     assert article.guid == "1001561197"
     assert article.summary == "נקודה ראשונה • נקודה שנייה • נקודה שלישית"
     assert article.published_at == datetime(2026, 10, 29, 13, 30, tzinfo=UTC)
@@ -50,7 +50,7 @@ def test_parses_globes_style_item():
 
 def test_unparseable_feed_raises():
     with pytest.raises(ValueError, match="Could not parse feed broken"):
-        parse_feed(Feed(name="broken", url="unused"), b"<html>not a feed")
+        parse_feed(Feed(name="broken", url="unused", category="politics", site=YNET), b"<html>not a feed")
 
 
 @pytest.mark.parametrize(
