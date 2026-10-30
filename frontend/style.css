@@ -36,6 +36,11 @@ body {
 }
 
 .page-header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px 24px;
   padding: 18px 24px 14px;
   border-bottom: 1px solid var(--divider);
 }
@@ -49,6 +54,15 @@ body {
 .page-notice {
   margin: 6px 0 0;
   font-size: 14px;
+  color: var(--secondary-text);
+}
+
+/* Usage totals in the top-right corner. On a narrow screen they wrap below the title, still right-aligned. */
+.usage {
+  margin-left: auto;
+  font-size: 12px;
+  line-height: 1.6;
+  text-align: right;
   color: var(--secondary-text);
 }
 

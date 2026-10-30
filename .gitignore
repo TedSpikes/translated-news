@@ -3,3 +3,5 @@ __pycache__/
 .pytest_cache/
 data/
 .claude/settings.local.json
+# Files that hold real secrets; 1password.env holds only references and is committed.
+.env

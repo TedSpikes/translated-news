@@ -5,6 +5,7 @@ description = "Israeli news headlines with automatic translation"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "anthropic>=2.3.0",
     "fastapi>=0.162.0",
     "feedparser>=6.0.14",
     "httpx>=0.28.1",

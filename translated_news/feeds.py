@@ -69,6 +69,8 @@ class Article:
     headline: str
     summary: str
     published_at: datetime
+    english_headline: str | None = None
+    english_summary: str | None = None
 
 
 def clean_text(raw_html: str) -> str:

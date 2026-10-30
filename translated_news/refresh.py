@@ -22,9 +22,11 @@ ARTICLE_RETENTION = timedelta(days=365)
 async def refresh_feeds(database_path: Path) -> int:
     """Returns how many articles the feeds held."""
     articles = await fetch_all_feeds()
-    database.save_articles(database_path, articles)
+    new_count = database.save_articles(database_path, articles)
     deleted_count = database.delete_articles_published_before(database_path, datetime.now(UTC) - ARTICLE_RETENTION)
-    logger.info("Saved %d articles, deleted %d older than %d days", len(articles), deleted_count, ARTICLE_RETENTION.days)
+    logger.info(
+        "Saved %d articles (%d new), deleted %d older than %d days", len(articles), new_count, deleted_count, ARTICLE_RETENTION.days
+    )
     return len(articles)
 
 

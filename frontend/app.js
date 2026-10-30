@@ -1,14 +1,25 @@
 // Asks the server to fetch the feeds, then fills each column with articles from its category,
-// newest first, and loads older ones on request: automatically near the bottom when the columns
-// sit side by side, and with the "Load older articles" button when they are stacked (so one
-// column can't block the next).
+// newest first; each column's "Load older articles" button adds its next page. Once the first pages
+// are showing, it asks the server to translate whatever in them isn't translated yet, and swaps
+// each translation in where the original is.
 
-const ARTICLES_PER_PAGE = 30;
+// The same as ARTICLES_TRANSLATED_PER_CATEGORY on the server, so the first page is the translated set.
+const ARTICLES_PER_PAGE = 20;
 const HEBREW_LETTER = /[\u0590-\u05FF]/;
-// Must match the width in style.css below which the columns stack.
-const COLUMNS_SIDE_BY_SIDE = window.matchMedia("(min-width: 961px)");
 const relativeTime = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
 const resultTemplate = document.getElementById("result-template");
+// Every article on the page and its element, so a translation that arrives later can replace it.
+const shownArticles = new Map();
+
+function articleKey(article) {
+  return `${article.feed_name}\n${article.guid}`;
+}
+
+function showNotice(noticeId, message) {
+  const notice = document.getElementById(noticeId);
+  notice.textContent = message;
+  notice.hidden = !message;
+}
 
 function describeAge(publishedAt) {
   const minutesAgo = Math.round((Date.now() - new Date(publishedAt)) / 60_000);
@@ -38,12 +49,14 @@ function renderArticle(article) {
     return null;
   }
   const result = resultTemplate.content.firstElementChild.cloneNode(true);
-  // Hebrew reads right to left; English (once translated) left to right.
-  result.dir = HEBREW_LETTER.test(article.headline) ? "rtl" : "ltr";
+  const headline = article.english_headline ?? article.headline;
+  const summary = article.english_summary ?? article.summary;
+  // Hebrew reads right to left; English left to right.
+  result.dir = HEBREW_LETTER.test(headline) ? "rtl" : "ltr";
 
   const title = result.querySelector(".result-title");
   title.href = url.href;
-  title.textContent = article.headline;
+  title.textContent = headline;
 
   const favicon = result.querySelector(".result-favicon");
   favicon.src = article.site.favicon_url;
@@ -54,8 +67,10 @@ function renderArticle(article) {
   result.querySelector(".result-age").textContent = describeAge(article.published_at);
 
   const teaser = result.querySelector(".result-teaser");
-  teaser.textContent = article.summary;
-  teaser.hidden = !article.summary;
+  teaser.textContent = summary;
+  teaser.hidden = !summary;
+
+  shownArticles.set(articleKey(article), { article, element: result });
   return result;
 }
 
@@ -74,14 +89,14 @@ function setUpColumn(column) {
   const status = column.querySelector(".column-status");
   const loadOlderButton = column.querySelector(".load-older");
   let lastShownArticle = null;
-  let lastLoadFailed = false;
 
   function showStatus(message) {
     status.textContent = message;
     status.hidden = !message;
   }
 
-  // The button stays hidden while a page loads, so neither a click nor the observer can start a second load.
+  // The button stays hidden while a page loads, so a second click can't start a second load.
+  // Returns the page's articles (none if it failed).
   async function loadNextPage() {
     loadOlderButton.hidden = true;
     showStatus("Loading…");
@@ -90,7 +105,6 @@ function setUpColumn(column) {
       if (!response.ok) throw new Error(`the server answered ${response.status}`);
       const articles = await response.json();
       resultList.append(...articles.map(renderArticle).filter(Boolean));
-      lastLoadFailed = false;
       if (articles.length === ARTICLES_PER_PAGE) {
         lastShownArticle = articles.at(-1);
         showStatus("");
@@ -98,27 +112,18 @@ function setUpColumn(column) {
       } else if (lastShownArticle || articles.length) {
         showStatus("No older articles. The archive goes back to when the server started collecting.");
       } else {
-        showStatus("No articles yet. The server fetches the feeds when it starts; reload in a few seconds.");
+        showStatus("No articles yet. The server fetches the feeds when the page opens; reload in a few seconds.");
       }
+      return articles;
     } catch (error) {
-      // No automatic retry after a failure, or a down server would be asked again and again.
-      lastLoadFailed = true;
       showStatus(`Couldn't load articles: ${error.message}`);
-      loadOlderButton.hidden = false;
+      loadOlderButton.hidden = false;  // a click tries the same page again
+      return [];
     }
   }
 
-  // Fires when the button appears within 800px below the screen, including right after a page
-  // loads, so a column keeps filling until its end is out of reach.
-  const nearBottomObserver = new IntersectionObserver(
-    ([entry]) => {
-      if (entry.isIntersecting && COLUMNS_SIDE_BY_SIDE.matches && !lastLoadFailed) loadNextPage();
-    },
-    { rootMargin: "0px 0px 800px 0px" },
-  );
-  nearBottomObserver.observe(loadOlderButton);
   loadOlderButton.addEventListener("click", loadNextPage);
-  loadNextPage();
+  return loadNextPage();
 }
 
 // If the feeds can't be fetched, the saved articles are still worth showing, with a note saying so.
@@ -127,10 +132,97 @@ async function refreshFeeds() {
     const response = await fetch("/refresh", { method: "POST" });
     if (!response.ok) throw new Error(`the server answered ${response.status}`);
   } catch (error) {
-    const notice = document.querySelector(".page-notice");
-    notice.textContent = `Couldn't check for new articles (${error.message}); showing the saved ones.`;
-    notice.hidden = false;
+    showNotice("refresh-notice", `Couldn't check for new articles (${error.message}); showing the saved ones.`);
   }
 }
 
-refreshFeeds().then(() => document.querySelectorAll(".column").forEach(setUpColumn));
+// The lines of a streamed response, each as soon as it has fully arrived.
+async function* responseLines(response) {
+  const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+  let unfinished = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    const lines = (unfinished + value).split("\n");
+    unfinished = lines.pop();
+    yield* lines.filter(Boolean);
+  }
+  if (unfinished) yield unfinished;
+}
+
+function showTranslation(translation) {
+  const shown = shownArticles.get(articleKey(translation));
+  if (!shown) return;
+  const translated = { ...shown.article, english_headline: translation.english_headline, english_summary: translation.english_summary };
+  shown.element.replaceWith(renderArticle(translated));
+}
+
+// Runs after the first pages are showing, so the page never waits for Claude. The server translates
+// one article per request and sends each result as it finishes; until then an article shows its
+// Hebrew original.
+async function translateFirstPages(firstPageArticles) {
+  const untranslatedCount = firstPageArticles.filter((article) => article.english_headline == null).length;
+  if (untranslatedCount === 0) return;
+  const failures = [];
+  let translatedCount = 0;
+  showNotice("translation-notice", `Translating ${untranslatedCount} new articles…`);
+  try {
+    const response = await fetch("/translate", { method: "POST" });
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      throw new Error(body?.detail ?? `the server answered ${response.status}`);
+    }
+    for await (const line of responseLines(response)) {
+      const message = JSON.parse(line);
+      if (message.translation) {
+        showTranslation(message.translation);
+        translatedCount += 1;
+        showNotice("translation-notice", `Translating ${untranslatedCount} new articles… ${translatedCount} done`);
+      } else {
+        failures.push(message.failure);
+      }
+    }
+    showNotice(
+      "translation-notice",
+      failures.length ? `${failures.length} articles weren't translated (${failures[0]}); they show in Hebrew and the next visit tries again.` : "",
+    );
+  } catch (error) {
+    showNotice("translation-notice", `${error.message}. Showing the originals; the next visit tries again.`);
+  }
+}
+
+const compactNumber = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
+
+function describeUsage(label, totals) {
+  const dollars = totals.cost_dollars < 1 ? totals.cost_dollars.toFixed(3) : totals.cost_dollars.toFixed(2);
+  return (
+    `${label}: ${totals.articles_stored.toLocaleString("en")} stored · ${totals.articles_translated.toLocaleString("en")} translated · ` +
+    `${compactNumber.format(totals.input_tokens)} in / ${compactNumber.format(totals.output_tokens)} out tokens · $${dollars}`
+  );
+}
+
+// The grey totals in the top-right corner; a failure here just leaves the corner empty.
+async function showUsage() {
+  try {
+    const response = await fetch("/usage");
+    if (!response.ok) throw new Error(`the server answered ${response.status}`);
+    const usage = await response.json();
+    const monthName = new Date(`${usage.month}-01T00:00:00Z`).toLocaleString("en", { month: "long", timeZone: "UTC" });
+    const lines = [describeUsage(monthName, usage.this_month), describeUsage("All time", usage.all_time)].map((text) => {
+      const line = document.createElement("div");
+      line.textContent = text;
+      return line;
+    });
+    document.getElementById("usage").replaceChildren(...lines);
+  } catch (error) {
+    console.warn("Couldn't load usage totals", error);
+  }
+}
+
+refreshFeeds()
+  .then(() => Promise.all([...document.querySelectorAll(".column")].map(setUpColumn)))
+  .then(async (firstPages) => {
+    showUsage();
+    await translateFirstPages(firstPages.flat());
+    showUsage();
+  });
